@@ -19,25 +19,14 @@
 #include "wifi_esp32.h"
 #include "stm32_legacy.h"
 #define DEBUG_MODULE  "WIFI_UDP"
-#include "debug_cf.h"
-
-#define UDP_SERVER_PORT         2390
+#include "debug_cf.h"#define UDP_SERVER_PORT         2390
 #define UDP_SERVER_BUFSIZE      128
 
 static struct sockaddr_in6 source_addr; // Large enough for both IPv4 or IPv6
 
 //#define WIFI_SSID      "Udp Server"
-static const char *TAG = "wifi station";
-// static char WIFI_SSID[32] = "TP-LINK_B128";
-// static char WIFI_PWD[64] = "18996170720" ;
-char WIFI_SSID[] = "TP-LINK_B128";
-char WIFI_PWD[] = "18996170720" ;
-static int s_retry_num = 0;
-#define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
-#define EXAMPLE_ESP_MAXIMUM_RETRY  10
-static EventGroupHandle_t s_wifi_event_group;
-
+static char WIFI_SSID[32] = "ESP-DRONE";
+static char WIFI_PWD[64] = "12345678" ;
 #define MAX_STA_CONN (1)
 
 static char rx_buffer[UDP_SERVER_BUFSIZE];
@@ -71,41 +60,19 @@ static uint8_t calculate_cksum(void *data, size_t len)
     return cksum;
 }
 
-// static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-//                                int32_t event_id, void *event_data)
-// {
-//     if (event_id == WIFI_EVENT_AP_STACONNECTED) {
-//         wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *) event_data;
-//         DEBUG_PRINT_LOCAL("station "MACSTR" join, AID=%d",
-//                           MAC2STR(event->mac), event->aid);
-
-//     } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-//         wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *) event_data;
-//         DEBUG_PRINT_LOCAL("station "MACSTR" leave, AID=%d",
-//                           MAC2STR(event->mac), event->aid);
-//     } 
-// }
-
-static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                                int32_t event_id, void* event_data)
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-            ESP_LOGI(TAG, "retry to connect to the AP");
-        } else {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-        }
-        ESP_LOGI(TAG,"connect to the AP fail");
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
-        s_retry_num = 0;
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-    }
+    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *) event_data;
+        DEBUG_PRINT_LOCAL("station "MACSTR" join, AID=%d",
+                          MAC2STR(event->mac), event->aid);
+
+    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *) event_data;
+        DEBUG_PRINT_LOCAL("station "MACSTR" leave, AID=%d",
+                          MAC2STR(event->mac), event->aid);
+    } 
 }
 
 
@@ -232,78 +199,57 @@ static void udp_server_tx_task(void *pvParameters)
     }
 }
 
+
 void wifiInit(void)
 {
     if (isInit) {
         return;
     }
 
-    s_wifi_event_group = xEventGroupCreate();
     esp_netif_t *ap_netif = NULL;
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    ap_netif = esp_netif_create_default_wifi_sta();
+    ap_netif = esp_netif_create_default_wifi_ap();
     uint8_t mac[6];
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                     ESP_EVENT_ANY_ID,
                     &wifi_event_handler,
                     NULL,
-                    &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        &instance_got_ip));
-    wifi_config_t wifi_config = {};
-    strcpy((char *)wifi_config.sta.ssid, WIFI_SSID);
-    strcpy((char *)wifi_config.sta.password, WIFI_PWD);
-    wifi_config.sta.threshold.authmode =  WIFI_AUTH_WPA2_PSK;
-    // if (strlen(WIFI_PWD) == 0) {
-    //     wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-    // }
+                    NULL));
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_get_mac(ESP_IF_WIFI_AP, mac));
+    sprintf(WIFI_SSID, "ESP-DRONE_%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    ESP_LOGI(TAG, "wifi_init_sta finished.");
+    wifi_config_t wifi_config;
+    memcpy(wifi_config.ap.ssid, WIFI_SSID, strlen(WIFI_SSID) + 1) ;
+    wifi_config.ap.ssid_len = strlen(WIFI_SSID);
+    memcpy(wifi_config.ap.password, WIFI_PWD, strlen(WIFI_PWD) + 1) ;
+    wifi_config.ap.max_connection = MAX_STA_CONN;
+    wifi_config.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
+    wifi_config.ap.channel  = 13;
 
-    /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
-     * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-            pdFALSE,
-            pdFALSE,
-            portMAX_DELAY);
-
-    /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
-     * happened. */
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
-                 WIFI_SSID, WIFI_PWD);
-    } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
-                 WIFI_SSID, WIFI_PWD);
-    } else {
-        ESP_LOGE(TAG, "UNEXPECTED EVENT");
+    if (strlen(WIFI_PWD) == 0) {
+        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
 
-    // esp_netif_ip_info_t ip_info = {
-    //     .ip.addr = ipaddr_addr("192.168.43.42"),
-    //     .netmask.addr = ipaddr_addr("255.255.255.0"),
-    //     .gw.addr      = ipaddr_addr("192.168.43.42"),
-    // };
-    // ESP_ERROR_CHECK(esp_netif_dhcps_stop(ap_netif));
-    // ESP_ERROR_CHECK(esp_netif_set_ip_info(ap_netif, &ip_info));
-    // ESP_ERROR_CHECK(esp_netif_dhcps_start(ap_netif));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
 
-    // DEBUG_PRINT_LOCAL("wifi_init_softap complete.SSID:%s password:%s", WIFI_SSID, WIFI_PWD);
+    esp_netif_ip_info_t ip_info = {
+        .ip.addr = ipaddr_addr("192.168.43.42"),
+        .netmask.addr = ipaddr_addr("255.255.255.0"),
+        .gw.addr      = ipaddr_addr("192.168.43.42"),
+    };
+    ESP_ERROR_CHECK(esp_netif_dhcps_stop(ap_netif));
+    ESP_ERROR_CHECK(esp_netif_set_ip_info(ap_netif, &ip_info));
+    ESP_ERROR_CHECK(esp_netif_dhcps_start(ap_netif));
+
+    DEBUG_PRINT_LOCAL("wifi_init_softap complete.SSID:%s password:%s", WIFI_SSID, WIFI_PWD);
 
     // This should probably be reduced to a CRTP packet size
     udpDataRx = xQueueCreate(5, sizeof(UDPPacket)); /* Buffer packets (max 64 bytes) */
@@ -319,69 +265,3 @@ void wifiInit(void)
     xTaskCreate(udp_server_rx_task, UDP_RX_TASK_NAME, UDP_RX_TASK_STACKSIZE, NULL, UDP_RX_TASK_PRI, NULL);
     isInit = true;
 }
-
-// void wifiInit(void)
-// {
-//     if (isInit) {
-//         return;
-//     }
-
-//     esp_netif_t *ap_netif = NULL;
-//     ESP_ERROR_CHECK(esp_netif_init());
-//     ESP_ERROR_CHECK(esp_event_loop_create_default());
-//     ap_netif = esp_netif_create_default_wifi_ap();
-//     uint8_t mac[6];
-
-//     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-//     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-//     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-//                     ESP_EVENT_ANY_ID,
-//                     &wifi_event_handler,
-//                     NULL,
-//                     NULL));
-
-//     ESP_ERROR_CHECK(esp_wifi_get_mac(ESP_IF_WIFI_AP, mac));
-//     sprintf(WIFI_SSID, "ESP-DRONE_%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
-//     wifi_config_t wifi_config;
-//     memcpy(wifi_config.ap.ssid, WIFI_SSID, strlen(WIFI_SSID) + 1) ;
-//     wifi_config.ap.ssid_len = strlen(WIFI_SSID);
-//     memcpy(wifi_config.ap.password, WIFI_PWD, strlen(WIFI_PWD) + 1) ;
-//     wifi_config.ap.max_connection = MAX_STA_CONN;
-//     wifi_config.ap.authmode = WIFI_AUTH_WPA_WPA2_PSK;
-//     wifi_config.ap.channel  = 13;
-
-//     if (strlen(WIFI_PWD) == 0) {
-//         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-//     }
-
-//     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-//     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
-//     ESP_ERROR_CHECK(esp_wifi_start());
-
-//     esp_netif_ip_info_t ip_info = {
-//         .ip.addr = ipaddr_addr("192.168.43.42"),
-//         .netmask.addr = ipaddr_addr("255.255.255.0"),
-//         .gw.addr      = ipaddr_addr("192.168.43.42"),
-//     };
-//     ESP_ERROR_CHECK(esp_netif_dhcps_stop(ap_netif));
-//     ESP_ERROR_CHECK(esp_netif_set_ip_info(ap_netif, &ip_info));
-//     ESP_ERROR_CHECK(esp_netif_dhcps_start(ap_netif));
-
-//     DEBUG_PRINT_LOCAL("wifi_init_softap complete.SSID:%s password:%s", WIFI_SSID, WIFI_PWD);
-
-//     // This should probably be reduced to a CRTP packet size
-//     udpDataRx = xQueueCreate(5, sizeof(UDPPacket)); /* Buffer packets (max 64 bytes) */
-//     DEBUG_QUEUE_MONITOR_REGISTER(udpDataRx);
-//     udpDataTx = xQueueCreate(5, sizeof(UDPPacket)); /* Buffer packets (max 64 bytes) */
-//     DEBUG_QUEUE_MONITOR_REGISTER(udpDataTx);
-//     if (udp_server_create(NULL) == ESP_FAIL) {
-//         DEBUG_PRINT_LOCAL("UDP server create socket failed!!!");
-//     } else {
-//         DEBUG_PRINT_LOCAL("UDP server create socket succeed!!!");
-//     } 
-//     xTaskCreate(udp_server_tx_task, UDP_TX_TASK_NAME, UDP_TX_TASK_STACKSIZE, NULL, UDP_TX_TASK_PRI, NULL);
-//     xTaskCreate(udp_server_rx_task, UDP_RX_TASK_NAME, UDP_RX_TASK_STACKSIZE, NULL, UDP_RX_TASK_PRI, NULL);
-//     isInit = true;
-// }
